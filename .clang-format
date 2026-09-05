@@ -1,0 +1,19 @@
+ColumnLimit: 100
+IndentWidth: 4
+AccessModifierOffset: -4
+IndentCaseLabels: true
+
+AllowShortBlocksOnASingleLine: Empty
+AllowShortFunctionsOnASingleLine: None
+AllowShortEnumsOnASingleLine: false
+AllowShortLambdasOnASingleLine: None
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: false
+  AfterEnum: false
+  SplitEmptyFunction: false
+
+PackConstructorInitializers: Never
+AlignConsecutiveAssignments: true
+AlwaysBreakTemplateDeclarations: Yes
