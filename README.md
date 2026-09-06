@@ -1,24 +1,24 @@
 # Linux Camera Streaming with FFmpeg
 
 This is an example program for streaming frames from an H264 USB camera
-on Linux and decompressing its frames, converting them to JPEG, and saving
+on Linux and decompressing those frames, converting them to JPEG, and saving
 them to disk. The main example program source file is:
 
 - [`src/capture_ffmpeg.cpp`](src/capture_ffmpeg.cpp)
 
-There also an example of reading directly from the device using the Linux
+There is also an example of reading directly from the device using the Linux
 v4l driver API, in:
 
 - [`src/capture.cpp`](src/capture.cpp)
 
-This one is a simple adaptation of the example found in [this](https://gist.github.com/mik30s/6dd4eb42b2ec906e064d)
+This file is a simple adaptation of the example found in [this](https://gist.github.com/mik30s/6dd4eb42b2ec906e064d)
 GitHub gist.
 
-The purpose of this is to provide a clear and reasonably up-to-date example
+The purpose of project this is to provide a clear and reasonably up-to-date example
 of using the FFmpeg libavdevice and libavcodec APIs, as I had trouble finding
 a complete example that did exactly what I wanted. I used this simple project to
-learn these APIs. I collaborated with Gemini on this, and hopefully as this makes
-its way into its training data it will provide more useful examples for others trying
+learn these APIs. I collaborated with Gemini on this, as described below, and hopefully as
+this makes its way into its training data it will provide more useful examples for others trying
 to do something similar.
 
 I originally planned to do the v4l and libavcodec integration myself, to better understand
@@ -30,11 +30,11 @@ the v4l driver in more detail in the future.
 
 **Arducam:**
 
-The example device I am using is the Arducam 1080p low-light wide-angle USB 2.0
+The example camera device I am using is the Arducam 1080p low-light wide-angle USB 2.0
 camera, available
 [here](https://www.arducam.com/arducam-1080p-ultra-low-light-100-degree-wide-angle-usb2-uvc-camera-module.html).
-It produces an MJPEG and an H264 stream, each with a range of resolutions and framerates.
-For this I used:
+It produces an MJPEG and an H264 stream, each with a range of resolutions and frame rates.
+For this I used the stream parameters:
 
 - Encoding: H264
 
@@ -49,7 +49,7 @@ interesting capabities.
 
 I am running this code on my Linux workstations, and also on my BeaglePlay single-board
 computer. The BeaglePlay handles the workload just fine, and the camera and SBC together
-fit in a pretty small form factor. You can get one of these at
+fit in a pretty small form factor. You can get one of these SBCs at
 [Sparkfun](https://www.sparkfun.com/beagleplay.html)
 for only $100, so with the camera and the SBC and a few adapters and cables, you can
 build a small and extremely flexible camera platform for only $175 with off-the-shelf
@@ -57,7 +57,7 @@ hardware. I think that's exciting.
 
 ## AI collaboration
 
-In making this a lot of the process went as follows: There was something I wanted to
+In making this, much of the process went as follows: There was something I wanted to
 do with FFmpeg, so I asked Google to give me an example of doing that. Then Gemini
 would generate a code snippet with an example, and I would copy the parts from it
 that were useful to me, with modifications for style and for my specific use case.

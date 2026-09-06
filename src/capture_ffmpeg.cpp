@@ -1,7 +1,7 @@
 /**
- * Following example to stream video from H264 device using ffmpeg
- * libavdevice to read from a camera using underlying Linux v4l
- * driver, and converting from H264 to JPEG using libavcodec.
+ * An example of streaming video from an H.264 device using FFmpeg
+ * libavdevice to read from the camera using the underlying Linux
+ * v4l driver, and then converting from H.264 to JPEG using libavcodec.
  *
  * We assume the following video stream parameters:
  *
@@ -9,6 +9,7 @@
  *       .width  = 1920,
  *       .height = 1080,
  *       .fps    = 30,
+ *       .codec  = AV_CODEC_ID_H264
  *   };
  *
  * though these could also be set dynamically from device info.
@@ -91,6 +92,7 @@ int setup_transcoder(H264ToJPEGInfo &transcoder_info, const FormatInfo &format_i
     AVCodecContext *encode_context = avcodec_alloc_context3(encoder);
     if (!encode_context) {
         std::cerr << "Error: Failed to allocate encoder context." << std::endl;
+        avcodec_free_context(&decode_context);
         return -1;
     }
 
@@ -98,11 +100,12 @@ int setup_transcoder(H264ToJPEGInfo &transcoder_info, const FormatInfo &format_i
     encode_context->height    = format_info.height;
     encode_context->time_base = (AVRational){1, (int)format_info.fps};
 
-    // We choose the first supported format.
+    // We choose the first supported output pixel format.
+    //
+    // NOTE: The pix_fmts member was deprecated and removed in more
+    // recent versions of ffmpeg, but the version in our package repo
+    // doesn't have the replacement API at this time.
     encode_context->pix_fmt = encoder->pix_fmts[0];
-    // NOTE: This pix_fmts member was deprecated and removed in more
-    // recent versions of ffmpeg. But the version in our repo doesn't
-    // have the replacement API at this time.
 
     if (avcodec_open2(encode_context, encoder, NULL) < 0) {
         std::cerr << "Error: Failed to open MJPEG encoder." << std::endl;
@@ -111,8 +114,8 @@ int setup_transcoder(H264ToJPEGInfo &transcoder_info, const FormatInfo &format_i
         return -1;
     }
 
-    // ------------------------------
-    // Got requested decoder/encoder.
+    // ---------------------------------------
+    // Successfully requested decoder/encoder.
 
     transcoder_info.decoder        = decoder;
     transcoder_info.decode_context = decode_context;
@@ -125,29 +128,35 @@ int setup_transcoder(H264ToJPEGInfo &transcoder_info, const FormatInfo &format_i
 
 int check_format(AVFormatContext *format_context, uint32_t stream_index) {
     assert(stream_index < format_context->nb_streams);
-    AVStream *stream                = format_context->streams[stream_index];
+    AVStream *stream = format_context->streams[stream_index];
+
     AVCodecParameters *codec_params = stream->codecpar;
     enum AVCodecID codec_id         = codec_params->codec_id;
     enum AVPixelFormat pixel_format = (enum AVPixelFormat)codec_params->format;
 
+    // We explicitly create an H.264 decoder, so the stream needs that encoding.
     std::cout << " - Stream format (expect H.264): " << avcodec_get_name(codec_id) << " ("
               << static_cast<unsigned>(codec_id) << ")." << std::endl;
     assert(codec_id == AV_CODEC_ID_H264);
 
+    // All that matters is that the decoder supports the device stream's
+    // format, but our example device uses YUV402P for its pixels.
     std::cout << " - Verifying pixel format (expect 0 = YUV420P): " << pixel_format << std::endl;
-    // This may not actually matter as the decoder is flexible.
 
     return 0;
 }
 
 int do_transcode(H264ToJPEGInfo &transcoder_info, TranscodeData &transcode_data,
                  const std::filesystem::path &output_directory) {
-    // ----------------------------------------
-    // Convert H264 data packet to pixel frame.
 
     AVPacket *h264_packet = transcode_data.h264_packet;
     AVFrame *h264_frame   = transcode_data.h264_frame;
     AVPacket *jpeg_packet = transcode_data.jpeg_packet;
+
+    static int frame_num = 0;
+
+    // -----------------------------------------
+    // Convert H.264 data packet to pixel frame.
 
     avcodec_send_packet(transcoder_info.decode_context, h264_packet);
 
@@ -165,7 +174,7 @@ int do_transcode(H264ToJPEGInfo &transcoder_info, TranscodeData &transcode_data,
     //       raw pixel data already in memory.
 
     // ----------------------------------
-    // Convert H264 frame to JPEG packet.
+    // Convert H.264 frame to JPEG packet.
 
     ret = avcodec_send_frame(transcoder_info.encode_context, h264_frame);
     if (ret < 0) {
@@ -173,18 +182,16 @@ int do_transcode(H264ToJPEGInfo &transcoder_info, TranscodeData &transcode_data,
         return -1;
     }
 
-    static int frame_num = 0;
-    std::string filename = std::format("{}/output_{}.jpg", output_directory.string(), frame_num);
-
     ret = avcodec_receive_packet(transcoder_info.encode_context, jpeg_packet);
     if (ret < 0) {
-        std::cerr << "Error: Failed to decode H264 packet to JPEG." << std::endl;
+        std::cerr << "Error: Failed to decode H.264 packet to JPEG." << std::endl;
         return -1;
     }
 
     // --------------------
     // Write image to file.
 
+    std::string filename = std::format("{}/output_{}.jpg", output_directory.string(), frame_num);
     std::ofstream outFile(filename, std::ios::binary);
     assert(outFile);
     outFile.write(reinterpret_cast<const char *>(jpeg_packet->data), jpeg_packet->size);
@@ -192,8 +199,9 @@ int do_transcode(H264ToJPEGInfo &transcoder_info, TranscodeData &transcode_data,
     std::cout << std::format("Successfully encoded output and saved to  {} ({} bytes)\n", filename,
                              jpeg_packet->size)
               << std::endl;
-    frame_num++;
 
+    // Increment count for unique filenames per run.
+    frame_num++;
     return 0;
 }
 
@@ -205,7 +213,9 @@ int main() {
     static constexpr const char *DEVICE_ENV_NAME     = "LINUX_CAM_DEVICE";
     static constexpr const char *STREAM_NUM_ENV_NAME = "LINUX_CAM_STREAM_NUM";
 
+    // Using the video 4 Linux 2 driver.
     static constexpr const char *device_driver = "v4l2";
+    static constexpr int FRAMES_TO_CAPTURE     = 10;
 
     // For now we hardcode these based on our test device.
     static constexpr const char *desired_resolution = "1920x1080";
@@ -222,7 +232,6 @@ int main() {
 
     // We target stream 0 on test device, but can be overridden.
     int stream_index = 0;
-
     if (stream_num != nullptr) {
         try {
             stream_index = std::stoi(stream_num);
@@ -261,6 +270,7 @@ int main() {
 
     H264ToJPEGInfo decoder_info;
     if (int result = setup_transcoder(decoder_info, desired_format)) {
+        // setup_transcoder logs its own errors.
         return result;
     }
 
@@ -269,7 +279,7 @@ int main() {
                                     .jpeg_packet = av_packet_alloc()};
 
     if (!transcode_data.h264_frame || !transcode_data.h264_packet || !transcode_data.jpeg_packet) {
-        std::cerr << "Error: Failed to allocate transcode packet and frame data." << std::endl;
+        std::cerr << "Error: Failed to allocate transcoder packet and frame data." << std::endl;
         return -1;
     }
 
@@ -280,9 +290,8 @@ int main() {
     av_dict_set(&options, "video_size", desired_resolution, 0);
     av_dict_set(&options, "framerate", desired_framerate, 0);
 
-    AVFormatContext *format_context = nullptr;
     std::cout << "Opening device..." << std::endl;
-
+    AVFormatContext *format_context = nullptr;
     if (avformat_open_input(&format_context, device_name, input_format, &options) < 0) {
         std::cerr << "Error: Could not open input device." << std::endl;
         av_dict_free(&options);
@@ -296,35 +305,35 @@ int main() {
         return -1;
     }
 
-    // We explicitly create an H264 decoder, so check for that format.
+    // We explicitly create an H.264 decoder, so check stream for that format.
     std::cout << "Verifying stream format..." << std::endl;
     check_format(format_context, stream_index);
-    std::cout << "Dumping format info..." << std::endl;
+    std::cout << "Stream format info:" << std::endl;
     av_dump_format(format_context, stream_index, device_name, 0);
 
     // -------------------
     // Start receive data.
 
-    static constexpr int FRAMES_TO_CAPTURE = 10;
-    int frames_remaining                   = FRAMES_TO_CAPTURE;
-
     std::cout << "\nStarting packet capture..." << std::endl;
 
-    AVPacket *packet = transcode_data.h264_packet;
+    int frames_remaining = FRAMES_TO_CAPTURE;
+    AVPacket *packet     = transcode_data.h264_packet;
     while (frames_remaining > 0) {
         if (av_read_frame(format_context, packet) >= 0) {
-            std::cout << "Captured Packet: " << std::endl;
-            std::cout << " - Size: " << packet->size << " bytes" << std::endl;
-
             // Skip packets from other streams, if device has them.
-            if (packet->stream_index != 0) {
-                std::cerr << "Warning: Received packet from steam other than 0; dropping packet."
-                          << std::endl;
+            if (packet->stream_index != stream_index) {
+                std::string msg = std::format(
+                    "Warning: Received packet from steam other than {}; dropping packet.",
+                    stream_index);
+                std::cerr << msg << std::endl;
+                av_packet_unref(packet);
                 continue;
             }
 
+            std::cout << "Captured Packet: " << std::endl;
+            std::cout << " - Size: " << packet->size << " bytes" << std::endl;
+
             do_transcode(decoder_info, transcode_data, output_directory);
-            std::cout << "> Decode successful." << std::endl;
 
             // av_read_frame stores its data in a reference-counted
             // buffer, so we decrement the reference count here.
@@ -343,7 +352,6 @@ int main() {
     // End receive data.
 
     std::cout << "\nCleaning up..." << std::endl;
-
     avformat_close_input(&format_context);
 
     av_frame_free(&transcode_data.h264_frame);
@@ -351,6 +359,5 @@ int main() {
     av_packet_free(&transcode_data.jpeg_packet);
 
     std::cout << "Done!" << std::endl;
-
     return 0;
 }
