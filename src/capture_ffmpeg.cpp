@@ -12,13 +12,21 @@
  *   };
  *
  * though these could also be set dynamically from device info.
+ *
+ * Before running these env vars need to be set:
+ *  - OUTDIR_ENV_NAME: Directory where captured images will be written.
+ *  - DEVICE_ENV_NAME: The camera device to capture from.
  */
 
 #include <cassert>
 #include <cstdint>
+#include <cstdlib>
+#include <exception>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <string>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -39,6 +47,7 @@ struct FormatInfo {
     uint32_t width;
     uint32_t height;
     uint32_t fps;
+    enum AVCodecID codec;
 };
 
 struct TranscodeData {
@@ -91,6 +100,9 @@ int setup_transcoder(H264ToJPEGInfo &transcoder_info, const FormatInfo &format_i
 
     // We choose the first supported format.
     encode_context->pix_fmt = encoder->pix_fmts[0];
+    // NOTE: This pix_fmts member was deprecated and removed in more
+    // recent versions of ffmpeg. But the version in our repo doesn't
+    // have the replacement API at this time.
 
     if (avcodec_open2(encode_context, encoder, NULL) < 0) {
         std::cerr << "Error: Failed to open MJPEG encoder." << std::endl;
@@ -99,8 +111,8 @@ int setup_transcoder(H264ToJPEGInfo &transcoder_info, const FormatInfo &format_i
         return -1;
     }
 
-    // --------
-    // Success.
+    // ------------------------------
+    // Got requested decoder/encoder.
 
     transcoder_info.decoder        = decoder;
     transcoder_info.decode_context = decode_context;
@@ -123,15 +135,15 @@ int check_format(AVFormatContext *format_context, uint32_t stream_index) {
     assert(codec_id == AV_CODEC_ID_H264);
 
     std::cout << " - Verifying pixel format (expect 0 = YUV420P): " << pixel_format << std::endl;
-    // assert(pixel_format == AV_PIX_FMT_YUV420P);
     // This may not actually matter as the decoder is flexible.
 
     return 0;
 }
 
-int do_transcode(H264ToJPEGInfo &transcoder_info, TranscodeData &transcode_data) {
-    // ---------------------------------
-    // Convert raw H264 packet to frame.
+int do_transcode(H264ToJPEGInfo &transcoder_info, TranscodeData &transcode_data,
+                 const std::filesystem::path &output_directory) {
+    // ----------------------------------------
+    // Convert H264 data packet to pixel frame.
 
     AVPacket *h264_packet = transcode_data.h264_packet;
     AVFrame *h264_frame   = transcode_data.h264_frame;
@@ -147,6 +159,10 @@ int do_transcode(H264ToJPEGInfo &transcoder_info, TranscodeData &transcode_data)
         std::cerr << "Error: Failed to decode h264 packet." << std::endl;
         return -1;
     }
+
+    // TODO: This is a place where we could do some, say, OpenCV processing,
+    //       to determine if we want to keep the image, while we have the
+    //       raw pixel data already in memory.
 
     // ----------------------------------
     // Convert H264 frame to JPEG packet.
@@ -182,25 +198,66 @@ int do_transcode(H264ToJPEGInfo &transcoder_info, TranscodeData &transcode_data)
 }
 
 int main() {
-    avdevice_register_all();
+    // --------------------------------
+    // Get parameters from environment.
 
-    const char *device_driver = "v4l2";
-    const char *device_name   = "/dev/video4";
+    static constexpr const char *OUTDIR_ENV_NAME     = "LINUX_CAM_OUT_DIR";
+    static constexpr const char *DEVICE_ENV_NAME     = "LINUX_CAM_DEVICE";
+    static constexpr const char *STREAM_NUM_ENV_NAME = "LINUX_CAM_STREAM_NUM";
+
+    static constexpr const char *device_driver = "v4l2";
+
+    // For now we hardcode these based on our test device.
+    static constexpr const char *desired_resolution = "1920x1080";
+    static constexpr const char *desired_framerate  = "30";
+
+    static constexpr FormatInfo desired_format = {.width  = 1920, //
+                                                  .height = 1080,
+                                                  .fps    = 30,
+                                                  .codec  = AV_CODEC_ID_H264};
+
+    const char *device_name = std::getenv(DEVICE_ENV_NAME);
+    const char *outdir_name = std::getenv(OUTDIR_ENV_NAME);
+    const char *stream_num  = std::getenv(STREAM_NUM_ENV_NAME);
+
+    // We target stream 0 on test device, but can be overridden.
+    int stream_index = 0;
+
+    if (stream_num != nullptr) {
+        try {
+            stream_index = std::stoi(stream_num);
+        } catch (const std::exception &_) {
+            std::cerr << "Error: Invalid integer string in LINUX_CAM_STREAM_NUM." << std::endl;
+            return -1;
+        }
+    }
+
+    if (device_name == nullptr) {
+        std::cerr << "Error: Camera device variable LINUX_CAM_DEVICE is not set." << std::endl;
+        return -1;
+    }
+    if (outdir_name == nullptr) {
+        std::cerr << "Error: Image output directory LINUX_CAM_OUT_DIR is not set." << std::endl;
+        return -1;
+    }
+
+    std::filesystem::path output_directory(outdir_name);
+    if (!std::filesystem::is_directory(output_directory)) {
+        std::cerr << "Error: Current LINUX_CAM_OUT_DIR is not a directory: " << output_directory
+                  << std::endl;
+        return -1;
+    }
+
+    // ------------------
+    // Initialize ffmpeg.
+
+    avdevice_register_all();
 
     const AVInputFormat *input_format = av_find_input_format(device_driver);
     if (!input_format) {
         std::cerr << "Error: Could not find device driver." << std::endl;
         return -1;
     }
-
-    // -------------------
-    // Initialize decoder.
-
-    FormatInfo desired_format = {
-        .width  = 1920,
-        .height = 1080,
-        .fps    = 30,
-    };
 
     H264ToJPEGInfo decoder_info;
     if (int result = setup_transcoder(decoder_info, desired_format)) {
@@ -216,12 +273,12 @@ int main() {
         return -1;
     }
 
-    // ------------------------------------
-    // Setup device for reading and verify.
+    // --------------------------------------
+    // Setup device for streaming and verify.
 
     AVDictionary *options = nullptr;
-    av_dict_set(&options, "video_size", "1920x1080", 0);
-    av_dict_set(&options, "framerate", "30", 0);
+    av_dict_set(&options, "video_size", desired_resolution, 0);
+    av_dict_set(&options, "framerate", desired_framerate, 0);
 
     AVFormatContext *format_context = nullptr;
     std::cout << "Opening device..." << std::endl;
@@ -239,13 +296,11 @@ int main() {
         return -1;
     }
 
-    // Our device has one video stream, so we only read its packets.
-    static constexpr int STREAM_INDEX = 0;
-
+    // We explicitly create an H264 decoder, so check for that format.
     std::cout << "Verifying stream format..." << std::endl;
-    check_format(format_context, STREAM_INDEX);
+    check_format(format_context, stream_index);
     std::cout << "Dumping format info..." << std::endl;
-    av_dump_format(format_context, STREAM_INDEX, device_name, 0);
+    av_dump_format(format_context, stream_index, device_name, 0);
 
     // -------------------
     // Start receive data.
@@ -261,17 +316,21 @@ int main() {
             std::cout << "Captured Packet: " << std::endl;
             std::cout << " - Size: " << packet->size << " bytes" << std::endl;
 
-            // Verify assumption.
+            // Skip packets from other streams, if device has them.
             if (packet->stream_index != 0) {
                 std::cerr << "Warning: Received packet from steam other than 0; dropping packet."
                           << std::endl;
                 continue;
             }
 
-            // TODO: Send packet data to decoder to get image to write or display.
-            do_transcode(decoder_info, transcode_data);
+            do_transcode(decoder_info, transcode_data, output_directory);
             std::cout << "> Decode successful." << std::endl;
 
+            // av_read_frame stores its data in a reference-counted
+            // buffer, so we decrement the reference count here.
+            //
+            // We could also store a pointer to raw data from elswhere
+            // (say directly from v4l) in an AVPacket structure.
             av_packet_unref(packet);
             frames_remaining--;
         } else {
