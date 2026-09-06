@@ -1,4 +1,4 @@
-# Linux Camera Streaming and Conversion with FFmpeg
+# Linux Camera Streaming with FFmpeg
 
 This is an example program for streaming frames from an H264 USB camera
 on Linux and decompressing its frames, converting them to JPEG, and saving
@@ -18,7 +18,8 @@ The purpose of this is to provide a clear and reasonably up-to-date example
 of using the FFmpeg libavdevice and libavcodec APIs, as I had trouble finding
 a complete example that did exactly what I wanted. I used this simple project to
 learn these APIs. I collaborated with Gemini on this, and hopefully as this makes
-its way into its training data
+its way into its training data it will provide more useful examples for others trying
+to do something similar.
 
 I originally planned to do the v4l and libavcodec integration myself, to better understand
 the APIs involved. But I realized there were many details to work out that would take a
@@ -73,12 +74,8 @@ permits.
 I have also fallen into the habit of asking Google for high-level conceptual explanations.
 The ones it produces are often quite good. But, I always trace what it says back to
 the documentation or use it to build a reproduceable demonstration. I want to see proof
-and/or documentation, since my end goal is to build for fix something for a practical
-purpose.
-
-There was also that humorous moment when Gemini produced a C++ example that used both
-Windows and Linux APIs in the same codepath. I guess its training didn't have a full
-example on either platform, so it got as close as possible by combining them.
+and/or documentation, since my end goal is to build or fix something for a practical
+purpose, and that thing had better work.
 
 ## Further ideas
 
@@ -91,3 +88,8 @@ I may look into a different camera and a precision camera mount for creating 3D 
 multi-view imaging. That's something I've played with in the past, and there are some interesting
 recent developments in that field (see [Brush](https://github.com/ArthurBrussee/brush) for
 example).
+
+I have also considered ways to divide up the work of processing between the camera
+controller board and clients, and ways to filter the images that are stored. For example
+the controller could just stream the raw compressed frames to clients for some uses, and
+let them do whatever heavier processing they need in bulk.

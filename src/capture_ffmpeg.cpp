@@ -174,7 +174,7 @@ int do_transcode(H264ToJPEGInfo &transcoder_info, TranscodeData &transcode_data,
     }
 
     static int frame_num = 0;
-    std::string filename = std::format("scratch/output_{}.jpg", frame_num);
+    std::string filename = std::format("{}/output_{}.jpg", output_directory.string(), frame_num);
 
     ret = avcodec_receive_packet(transcoder_info.encode_context, jpeg_packet);
     if (ret < 0) {
