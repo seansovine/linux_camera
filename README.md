@@ -28,6 +28,11 @@ the v4l driver in more detail in the future.
 
 ## Example devices
 
+<p align="center" margin="20px">
+        <img src="https://github.com/seansovine/page_images/blob/main/photos/Linux%20camera%20photo%20cropped%20-%2020260909_201005.jpg?raw=true"
+        alt="image of MCU echo server connected to PC" width="400" style="padding-top: 10px; padding-bottom: 10px"/>
+</p>
+
 **Arducam:**
 
 The example camera device I am using is the Arducam 1080p low-light wide-angle USB 2.0
